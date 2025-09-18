@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "addl"
+version = "0.1.0"
+description = "Package for deep learning in pytorch"
+authors = [{name = "Alessandro Davoli"}]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+
+dependencies = [
+    "matplotlib>=3.10.0",
+    "numpy>=1.26.3",
+    "pandas>=2.2.1",
+    "scikit-learn>=1.6.1",
+    "scipy>=1.15.3",
+    "torch>=2.7.1"
+]
+
+[project.urls]
+Homepage = "https://github.com/adavoli91/addl"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["addl"]

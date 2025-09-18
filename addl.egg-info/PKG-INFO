@@ -1,0 +1,19 @@
+Metadata-Version: 2.4
+Name: addl
+Version: 0.1.0
+Summary: Package for deep learning in pytorch
+Author: Alessandro Davoli
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/adavoli91/addl
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE.md
+Requires-Dist: matplotlib>=3.10.0
+Requires-Dist: numpy>=1.26.3
+Requires-Dist: pandas>=2.2.1
+Requires-Dist: scikit-learn>=1.6.1
+Requires-Dist: scipy>=1.15.3
+Requires-Dist: torch>=2.7.1
+Dynamic: license-file
+
+# addl
