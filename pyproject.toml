@@ -25,4 +25,4 @@ Homepage = "https://github.com/adavoli91/addl"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["addl"]
+include = ["addl*"]

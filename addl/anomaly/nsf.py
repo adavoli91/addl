@@ -476,15 +476,18 @@ class RationalQuadraticSpline(torch.nn.Module):
         return x
 
 class LinearInvertibleTransform(torch.nn.Module):
-    def __init__(self, n_feat: int) -> None:
+    def __init__(self, n_feat: int, seed: int) -> None:
         '''
         Class to implement the linear invertible transformation.
 
         Args:
             n_feat: Total number of features.
+            seed: Random seed.
 
         Returns: None.
         '''
+        rand_gen = np.random.default_rng(seed = seed)
+        #
         super().__init__()
         self.n_feat = n_feat
         self.register_buffer('mat_perm', torch.eye(n_feat)[rand_gen.permutation(range(n_feat))])
@@ -555,8 +558,8 @@ class LinearInvertibleTransform(torch.nn.Module):
         return x
     
 class NSF(torch.nn.Module):
-    def __init__(self, d: int, n_feat: int, K: int, B: int, n_step: int = 2, n_hidden: int = 100, n_blocks: int = 1, n_feat_cond: int = None,
-                 min_dist_knots: float = 1e-4, min_der: float = 1e-6, min_offset: float = 1e-6) -> None:
+    def __init__(self, d: int, n_feat: int, K: int, B: int, device: str, n_step: int = 2, n_hidden: int = 100, n_blocks: int = 1, n_feat_cond: int = None,
+                 min_dist_knots: float = 1e-4, min_der: float = 1e-6, min_offset: float = 1e-6, seed: int = 123) -> None:
         '''
         Class to implement NSF.
 
@@ -565,6 +568,7 @@ class NSF(torch.nn.Module):
             n_feat: Total number of features.
             K: Number of bins (the number of knots is `K + 1`).
             B: Maximum coordinates of the bin.
+            device: Device where to save the model.
             n_step: Number of steps in the flow.
             n_hidden: Number of hidden layers of the linear transformation.
             n_blocks: Number of blocks of the linear transformation.
@@ -572,6 +576,7 @@ class NSF(torch.nn.Module):
             min_dist_knots: Minimum percentage distance between consecutive knots, if the total range length is 1.
             min_der: Minimum allowed value for the derivative of the spline.
             min_offset: Minimum offset used to regularize denominators.
+            seed: Random seed.
 
         Returns: None.
         '''
@@ -587,11 +592,14 @@ class NSF(torch.nn.Module):
                                                        n_feat_cond = n_feat_cond, min_dist_knots = min_dist_knots, min_der = min_der,
                                                        min_offset = min_offset))
             list_batch_norm.append(BatchNorm(n_feat = n_feat))
-            list_lin_inv_trans.append(LinearInvertibleTransform(n_feat = n_feat))
+            list_lin_inv_trans.append(LinearInvertibleTransform(n_feat = n_feat, seed = seed))
         #
         self.list_spline = torch.nn.ModuleList(list_spline)
         self.list_batch_norm = torch.nn.ModuleList(list_batch_norm)
         self.list_lin_inv_trans = torch.nn.ModuleList(list_lin_inv_trans)
+        #
+        self.n_feat = n_feat
+        self.device = device
 
     def forward(self, x: torch.Tensor, y: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         '''
@@ -605,6 +613,8 @@ class NSF(torch.nn.Module):
             u: 'Normalized version' of `x`.
             log_p_x: Log-probability of sample data.
         '''
+        n_feat = self.n_feat
+        device = self.device
         norm_distr = torch.distributions.MultivariateNormal(loc = torch.zeros(n_feat, device = device), covariance_matrix = torch.eye(n_feat, device = device))
         #
         log_det = 0
