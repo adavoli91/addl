@@ -551,7 +551,7 @@ class TrainModel:
             dict_artifacts['weights'] = model.state_dict()
             # save weights
             if path_artifacts is not None:
-                torch.save(model.state_dict(), os.path.join(path_artifacts, 'weights.p'))
+                torch.save(model.state_dict(), path_artifacts)
             #
             list_loss_train.append(loss_train)
             list_loss_valid.append(loss_valid)
@@ -566,6 +566,4 @@ class TrainModel:
 
         dict_artifacts['loss_train'] = list_loss_train
         dict_artifacts['loss_valid'] = list_loss_valid
-        if path_artifacts is not None:
-            pickle.dump(path_artifacts, open(os.path.join(path_artifacts, 'artifacts.pickle.gz'), 'wb'))
         return self.model, dict_artifacts
