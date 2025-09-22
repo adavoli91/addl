@@ -600,6 +600,7 @@ class NSF(torch.nn.Module):
         #
         self.n_feat = n_feat
         self.device = device
+        self.n_feat_cond = n_feat_cond
 
     def forward(self, x: torch.Tensor, y: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         '''
@@ -659,8 +660,7 @@ class NSF(torch.nn.Module):
         return x
     
 class TrainModel:
-    def __init__(self, model: torch.nn.Module, dict_params: dict, dataloader_train: DataLoader, dataloader_valid: DataLoader,
-                 path_artifacts: str = None)-> None: 
+    def __init__(self, model: torch.nn.Module, dict_params: dict, dataloader_train: DataLoader, dataloader_valid: DataLoader, path_artifacts: str = None)-> None: 
         '''
         Class to train the model.
 
@@ -700,7 +700,12 @@ class TrainModel:
         #
         X = batch.to(next(self.model.parameters()).device)
         #
-        _, log_p_x = self.model(X)
+        if (self.model.n_feat_cond is None) or (self.model.n_feat_cond <= 0):
+            _, log_p_x = self.model(x = X)
+        else:
+            y = X[:, -self.model.n_feat_cond:]
+            X = X[:, :-self.model.n_feat_cond]
+            _, log_p_x = self.model(x = X, y = y)
         loss = -log_p_x.to(next(self.model.parameters()).device).mean()
         #
         if training == True:
@@ -792,7 +797,12 @@ class TrainModel:
             model = self.model
             model.eval()
             with torch.no_grad():
-                u = model(val_data)[0].cpu()
+                if (self.model.n_feat_cond is None) or (self.model.n_feat_cond <= 0):
+                    u = model(x = val_data)[0].cpu()
+                else:
+                    val_data_x = val_data[:, :-self.model.n_feat_cond:]
+                    val_data_y = val_data[:, -self.model.n_feat_cond:]
+                    u = model(x = val_data_x, y = val_data_y)[0].cpu()
             kl = kl_standard_normal(u)
             #
             self.scheduler.step(loss_valid)
