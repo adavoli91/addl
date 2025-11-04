@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-import os
-import pickle
 from torch import nn
 from typing import Tuple
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -175,7 +173,7 @@ class MADE(nn.Module):
 
 class TrainModel:
     def __init__(self, model: torch.nn.Module, dict_params: dict, dataloader_train: DataLoader, dataloader_valid: DataLoader,
-                 path_artifacts: str = None)-> None: 
+                 path_artifacts: str = None) -> None: 
         '''
         Class to train the model.
 
@@ -210,16 +208,17 @@ class TrainModel:
         Returns:
             loss: Value of the loss function.
         '''
+        model = self.model
         loss = self.loss_func
         #
         if training == True:
             self.optimizer.zero_grad()
         #
-        X = batch.to(next(self.model.parameters()).device)
+        X = batch.to(next(model.parameters()).device)
         #
-        X, X_hat = self.model(X)
-        X = X.to(next(self.model.parameters()).device)
-        X_hat = X_hat.to(next(self.model.parameters()).device)
+        X, X_hat = model(X)
+        X = X.to(next(model.parameters()).device)
+        X_hat = X_hat.to(next(model.parameters()).device)
         # sum over features and average over ensemble
         loss_val = loss(X_hat, X).sum(axis = -1).mean(axis = 0)
         # average over batch
@@ -294,10 +293,10 @@ class TrainModel:
                 counter_patience += 1
             if (len(list_loss_valid) == 0) or (loss_valid < np.min(list_loss_valid)):
                 counter_patience = 0
-            dict_artifacts['weights'] = model.state_dict()
-            #
-            if path_artifacts is not None:
-                torch.save(model.state_dict(), path_artifacts)
+                dict_artifacts['weights'] = model.state_dict()
+                    # save weights
+                if path_artifacts is not None:
+                    torch.save(model.state_dict(), path_artifacts)
             #
             list_loss_train.append(loss_train)
             list_loss_valid.append(loss_valid)
@@ -305,8 +304,11 @@ class TrainModel:
             print(f"Epoch {epoch + 1}: training loss: {loss_train:.7f}, validation loss: {loss_valid:.7f}, learning rate = {self.optimizer.param_groups[0]['lr']}, counter patience = {counter_patience}")
             #
             if counter_patience >= dict_params['training']['patience']:
+                print(f'Training stopped at epoch {epoch + 1}. Restoring weights from epoch {np.argmin(list_loss_valid) + 1}.')
                 break
 
         dict_artifacts['loss_train'] = list_loss_train
         dict_artifacts['loss_valid'] = list_loss_valid
-        return self.model, dict_artifacts
+        if path_artifacts is not None:
+            model.load_state_dict(torch.load(path_artifacts))
+        return model, dict_artifacts

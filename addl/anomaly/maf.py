@@ -1,7 +1,5 @@
 import numpy as np
 import torch
-import os
-import pickle
 from torch import nn
 from typing import Tuple
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -407,7 +405,7 @@ class MAF(nn.Module):
     
 class TrainModel:
     def __init__(self, model: torch.nn.Module, dict_params: dict, dataloader_train: DataLoader, dataloader_valid: DataLoader,
-                 path_artifacts: str = None)-> None: 
+                 path_artifacts: str = None) -> None: 
         '''
         Class to train the model.
 
@@ -441,14 +439,20 @@ class TrainModel:
         Returns:
             loss: Value of the loss function.
         '''
+        model = self.model
         #
         if training == True:
             self.optimizer.zero_grad()
         #
-        X = batch.to(next(self.model.parameters()).device)
+        X = batch.to(next(model.parameters()).device)
         #
-        _, log_p_x = self.model(X)
-        loss = -log_p_x.to(next(self.model.parameters()).device).mean()
+        if (model.n_feat_cond is None) or (model.n_feat_cond <= 0):
+            _, log_p_x = model(x = X)
+        else:
+            y = X[:, -model.n_feat_cond:]
+            X = X[:, :-model.n_feat_cond]
+            _, log_p_x = model(x = X, y = y)
+        loss = -log_p_x.to(next(model.parameters()).device).mean()
         #
         if training == True:
             loss.backward()
@@ -510,7 +514,7 @@ class TrainModel:
         list_loss_train, list_loss_valid = [], []
         counter_patience = 0
         #
-        val_data = torch.cat([i for i in self.dataloader_valid]).to(next(self.model.parameters()).device)
+        val_data = torch.cat([i for i in self.dataloader_valid]).to(next(model.parameters()).device)
         #
         def kl_standard_normal(u: torch.tensor) -> float:
             '''
@@ -539,7 +543,12 @@ class TrainModel:
             model = self.model
             model.eval()
             with torch.no_grad():
-                u = model(val_data)[0].cpu()
+                if (model.n_feat_cond is None) or (model.n_feat_cond <= 0):
+                    u = model(x = val_data)[0].cpu()
+                else:
+                    val_data_x = val_data[:, :-model.n_feat_cond:]
+                    val_data_y = val_data[:, -model.n_feat_cond:]
+                    u = model(x = val_data_x, y = val_data_y)[0].cpu()
             kl = kl_standard_normal(u)
             #
             self.scheduler.step(loss_valid)
@@ -548,10 +557,10 @@ class TrainModel:
                 counter_patience += 1
             if (len(list_loss_valid) == 0) or (loss_valid < np.min(list_loss_valid)):
                 counter_patience = 0
-            dict_artifacts['weights'] = model.state_dict()
-            # save weights
-            if path_artifacts is not None:
-                torch.save(model.state_dict(), path_artifacts)
+                dict_artifacts['weights'] = model.state_dict()
+                # save weights
+                if path_artifacts is not None:
+                    torch.save(model.state_dict(), path_artifacts)
             #
             list_loss_train.append(loss_train)
             list_loss_valid.append(loss_valid)
@@ -562,8 +571,11 @@ class TrainModel:
                 f"]), learning rate = {self.optimizer.param_groups[0]['lr']}, counter patience = {counter_patience}.")
             #
             if counter_patience >= dict_params['training']['patience']:
+                print(f'Training stopped at epoch {epoch + 1}. Restoring weights from epoch {np.argmin(list_loss_valid) + 1}.')
                 break
 
         dict_artifacts['loss_train'] = list_loss_train
         dict_artifacts['loss_valid'] = list_loss_valid
-        return self.model, dict_artifacts
+        if path_artifacts is not None:
+            model.load_state_dict(torch.load(path_artifacts))
+        return model, dict_artifacts
