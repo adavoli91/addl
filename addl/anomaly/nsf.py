@@ -680,14 +680,13 @@ class TrainModel:
         self.optimizer = Adam(params = model.parameters(), lr = dict_params['training']['lr'])
         self.scheduler = ReduceLROnPlateau(optimizer = self.optimizer, patience = dict_params['training']['patience_sched'], factor = 0.5)
 
-    def _model_on_batch(self, batch: torch.Tensor, training: bool, loss_epoch: float) -> float:
+    def _model_on_batch(self, batch: torch.Tensor, training: bool) -> float:
         '''
         Function to perform training on a single batch of data.
 
         Args:
             batch: Batch of data to use for training/evaluation.
             training: Whether to perform training (if not, evaluation is understood).
-            loss_epoch: Loss of the current epoch.
             
         Returns:
             loss: Value of the loss function.
@@ -711,8 +710,7 @@ class TrainModel:
             loss.backward()
             self.optimizer.step()
         #
-        loss_epoch += loss.item()
-        return loss_epoch
+        return loss.item()
 
     def _train(self) -> float:
         '''
@@ -727,8 +725,8 @@ class TrainModel:
         loss = 0
         self.model.train()
         for batch in dataloader:
-                loss += self._model_on_batch(batch, training = True, loss_epoch = loss)/len(dataloader)
-        return loss
+                loss += self._model_on_batch(batch, training = True)
+        return loss/len(dataloader)
 
     def _eval(self) -> float:
         '''
@@ -744,8 +742,8 @@ class TrainModel:
         self.model.eval()
         with torch.no_grad():
             for batch in dataloader:
-                loss += self._model_on_batch(batch, training = False, loss_epoch = loss)/len(dataloader)
-        return loss
+                loss += self._model_on_batch(batch, training = False)
+        return loss/len(dataloader)
 
     def train_model(self) -> Tuple[torch.nn.Module, dict]:
         '''
