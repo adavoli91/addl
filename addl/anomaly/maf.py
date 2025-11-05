@@ -552,7 +552,7 @@ class TrainModel:
             #
             self.scheduler.step(loss_valid)
             #
-            if (len(list_loss_valid) > 0) and (loss_valid >= np.min(list_loss_valid)*(1 - dict_params['training']['min_delta'])):
+            if (len(list_loss_valid) > 0) and (loss_valid >= np.min(list_loss_valid)*(1 - dict_params['training']['min_delta_perc'])):
                 counter_patience += 1
             if (len(list_loss_valid) == 0) or (loss_valid < np.min(list_loss_valid)):
                 counter_patience = 0
