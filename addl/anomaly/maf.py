@@ -405,7 +405,7 @@ class MAF(nn.Module):
     
 class TrainModel:
     def __init__(self, model: torch.nn.Module, dict_params: dict, dataloader_train: DataLoader, dataloader_valid: DataLoader,
-                 path_artifacts: str = None) -> None: 
+                 path_artifacts: str = None, weight_decay: float = 1e-5) -> None: 
         '''
         Class to train the model.
 
@@ -415,6 +415,7 @@ class TrainModel:
             dataloader_train: Dataloader containing training data.
             dataloader_valid: Dataloader containing validation data.
             path_artifacts: Path where to save artifacts.
+            weight_decay: Weight decay used by Adam optimizer.
 
         Returns: None.
         '''
@@ -424,7 +425,7 @@ class TrainModel:
         self.dataloader_valid = dataloader_valid
         self.path_artifacts = path_artifacts
         #
-        self.optimizer = Adam(params = model.parameters(), lr = dict_params['training']['lr'])
+        self.optimizer = Adam(params = model.parameters(), lr = dict_params['training']['lr'], weight_decay = weight_decay)
         self.scheduler = ReduceLROnPlateau(optimizer = self.optimizer, patience = dict_params['training']['patience_sched'], factor = 0.5)
 
     def _model_on_batch(self, batch: torch.Tensor, training: bool) -> float:
