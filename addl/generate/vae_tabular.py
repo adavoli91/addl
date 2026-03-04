@@ -236,7 +236,7 @@ class TrainModel:
     def __init__(self, model: torch.nn.Module, dict_params: dict, dataloader_train: torch.utils.data.DataLoader,
                  dataloader_valid: torch.utils.data.DataLoader) -> None:
         '''
-        Class to train a FM with BPR loss.
+        Class to train a VAE.
 
         Args:
             model: Model to be trained.
