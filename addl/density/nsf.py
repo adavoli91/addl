@@ -289,9 +289,9 @@ class RationalQuadraticSpline(torch.nn.Module):
         K = self.K
         # for input values inside the range [-B, B], find the index of the first knot larger than input
         if inverse == False:
-            idx_knot_above = torch.searchsorted(knots_width.contiguous(), x, right = True).clamp(min = 1, max = K)
+            idx_knot_above = torch.searchsorted(knots_width.contiguous(), x.contiguous(), right = True).clamp(min = 1, max = K)
         else:
-            idx_knot_above = torch.searchsorted(knots_height.contiguous(), x, right = True).clamp(min = 1, max = K)
+            idx_knot_above = torch.searchsorted(knots_height.contiguous(), x.contiguous(), right = True).clamp(min = 1, max = K)
         idx_knot_below = idx_knot_above - 1
         # compute relevant knots for each input values
         rel_knot_width_below = knots_width.gather(dim = 2, index = idx_knot_below)
