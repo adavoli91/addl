@@ -182,7 +182,7 @@ class TrainModel:
         '''
         self.model = model
         self.dict_params_training = dict_params['training']
-        self.optimizer = torch.optim.AdamW(params = model.parameters(), lr = dict_params['training']['lr'])
+        self.optimizer = torch.optim.Adam(params = model.parameters(), lr = dict_params['training']['lr'])
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer = self.optimizer, factor = 0.5)
         self.dataloader_train = dataloader_train
         self.dataloader_valid = dataloader_valid
