@@ -420,7 +420,7 @@ class TrainModel:
                 model.load_state_dict(torch.load(path_artifacts))
                 break
             #
-            print(f'Epoch {epoch}: training loss = {loss_train:.4f}, validation loss = {loss_valid:.4f}, learning rate = {self.optimizer.param_groups[0]['lr']}, patience counter = {counter_patience}.')
+            print(f'Epoch {epoch}: training loss = {loss_train:.4f}, validation loss = {loss_valid:.4f}, learning rate = {self.optimizer.param_groups[0]["lr"]}, patience counter = {counter_patience}.')
             self.scheduler.step(loss_valid)
             #
             list_loss_train.append(loss_train)
