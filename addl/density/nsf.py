@@ -812,6 +812,7 @@ class TrainModel:
                 counter_patience += 1
             if (len(list_loss_valid) == 0) or (loss_valid < np.min(list_loss_valid)):
                 counter_patience = 0
+                best_weights = model.state_dict()
                 dict_artifacts['weights'] = model.state_dict()
                 # save weights
                 if path_artifacts is not None:
@@ -833,4 +834,5 @@ class TrainModel:
         dict_artifacts['loss_valid'] = list_loss_valid
         if path_artifacts is not None:
             model.load_state_dict(torch.load(path_artifacts))
+        model.load_state_dict(best_weights)
         return model, dict_artifacts

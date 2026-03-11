@@ -278,6 +278,7 @@ class TrainModel:
             list_loss_train: List of training loss function across the epochs.
             list_loss_valid: List of validation loss function across the epochs.
         '''
+        model = self.model
         dict_params_training = self.dict_params_training
         n_epochs = dict_params_training['n_epochs']
         list_loss_train, list_loss_valid = [], []
@@ -292,11 +293,12 @@ class TrainModel:
                 counter_patience += 1
             if (len(list_loss_valid) == 0) or ((len(list_loss_valid) > 0) and (loss_valid < np.min(list_loss_valid))):
                 counter_patience = 0
+                best_weights = model.state_dict()
                 if path_artifacts is not None:
-                        torch.save(self.model.state_dict(), path_artifacts)
+                        torch.save(model.state_dict(), path_artifacts)
             if counter_patience >= dict_params_training['patience']:
                 print(f'Training stopped at epoch {epoch}. Restoring weights from epoch {np.argmin(list_loss_valid) + 1}.')
-                self.model.load_state_dict(torch.load(path_artifacts))
+                model.load_state_dict(torch.load(path_artifacts))
                 break
             #
             print(f'Epoch {epoch}: training loss = {loss_train:.4f}, validation loss = {loss_valid:.4f}, patience counter = {counter_patience}.')
@@ -306,5 +308,6 @@ class TrainModel:
             list_loss_valid.append(loss_valid)
         #
         if path_artifacts is not None:
-            self.model.load_state_dict(torch.load(path_artifacts))
-        return self.model, list_loss_train, list_loss_valid
+            model.load_state_dict(torch.load(path_artifacts))
+        model.load_state_dict(best_weights)
+        return model, list_loss_train, list_loss_valid
