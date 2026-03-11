@@ -568,7 +568,7 @@ class TrainModel:
             print(f'Epoch {epoch + 1}: training loss: {loss_train:.7f}, validation loss: {loss_valid:.7f}, KL div = {kl:.7f} (mean = [' +
                 ', '.join([f'{i.item():.4f}' for i in u.mean(dim = 0)]) + '], var = [' + 
                 ', '.join([f'{i.item():.4f}' for i in u.var(dim = 0)]) +
-                f"]), learning rate = {self.optimizer.param_groups[0]['lr']}, counter patience = {counter_patience}.")
+                f"]), learning rate = {self.optimizer.param_groups[0]['lr']}, patience counter = {counter_patience}.")
             #
             if counter_patience >= dict_params['training']['patience']:
                 print(f'Training stopped at epoch {epoch + 1}. Restoring weights from epoch {np.argmin(list_loss_valid) + 1}.')

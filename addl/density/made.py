@@ -301,7 +301,7 @@ class TrainModel:
             list_loss_train.append(loss_train)
             list_loss_valid.append(loss_valid)
             #
-            print(f"Epoch {epoch + 1}: training loss: {loss_train:.7f}, validation loss: {loss_valid:.7f}, learning rate = {self.optimizer.param_groups[0]['lr']}, counter patience = {counter_patience}")
+            print(f"Epoch {epoch + 1}: training loss: {loss_train:.7f}, validation loss: {loss_valid:.7f}, learning rate = {self.optimizer.param_groups[0]['lr']}, patience counter = {counter_patience}")
             #
             if counter_patience >= dict_params['training']['patience']:
                 print(f'Training stopped at epoch {epoch + 1}. Restoring weights from epoch {np.argmin(list_loss_valid) + 1}.')
