@@ -51,7 +51,7 @@ class DEC(torch.nn.Module):
     
 class TrainModel:
     def __init__(self, n_clust: int, dataloader_train: torch.utils.data.DataLoader, dataloader_valid: torch.utils.data.DataLoader,
-                 n_feat_num: int, list_num_vals_cat: list):
+                 n_feat_num: int, list_num_vals_cat: list, seed: int = 123):
         '''
         Class to train DEC. Notice: the function `train_autoencoder` should be executed prior to `train_dec`.
 
@@ -61,6 +61,7 @@ class TrainModel:
             dataloader_valid: Validation dataloader.
             n_feat_num: Number of numerical features.
             list_num_vals_cat: List containing the number of different values for each categorical variable.
+            seed: Random seed.
 
         Returns:
             None.
@@ -70,6 +71,7 @@ class TrainModel:
         self.dataloader_valid = dataloader_valid
         self.n_feat_num = n_feat_num
         self.list_num_vals_cat = list_num_vals_cat
+        self.seed = seed
 
     def train_autoencoder(self, dict_params: dict) -> None:
         '''
@@ -106,7 +108,7 @@ class TrainModel:
         with torch.no_grad():
             x_enc = autoenc.encoder(dataset_train.X)
         self.autoenc.train()
-        k_means = KMeans(n_clusters = self.n_clust)
+        k_means = KMeans(n_clusters = self.n_clust, random_state = self.seed)
         k_means.fit(x_enc)
         centroids = torch.tensor(k_means.cluster_centers_).float()
         self.k_means = k_means

@@ -254,7 +254,7 @@ class TrainModel:
         Function to compute the loss for categorical variables.
 
         Args:
-            input: Input (reconstructed) tensor.
+            input: List of input (reconstructed) tensors.
             target: Target (ground truth) tensor.
 
         Returns:
@@ -273,7 +273,7 @@ class TrainModel:
 
         Args:
             x_dec_num: Input (reconstructed) tensor for numerical variables.
-            x_dec_cat: Input (reconstructed) tensor for categorical variables.
+            x_dec_cat: List of input (reconstructed) tensors for categorical variables.
             target: Target (ground truth) tensor.
 
         Returns:
