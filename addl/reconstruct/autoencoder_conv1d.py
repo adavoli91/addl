@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import warnings
+import copy
 from typing import Tuple
 from torch.nn import Conv1d, ConvTranspose1d, BatchNorm1d, ReLU, Parameter, Dropout
 
@@ -363,7 +364,7 @@ class TrainModel:
                 counter_patience += 1
             if (len(list_loss_valid) == 0) or (loss_valid < np.min(list_loss_valid)):
                 counter_patience = 0
-                best_weights = model.state_dict()
+                best_weights = copy.deepcopy(model.state_dict())
                 dict_artifacts['weights'] = model.state_dict()
                 # save weights
                 if path_artifacts is not None:

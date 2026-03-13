@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import copy
 from typing import Tuple
 
 class Encoder(torch.nn.Module):
@@ -130,7 +131,7 @@ class Decoder(torch.nn.Module):
 
         Returns:
             x_dec_num: Decoded input corresponding to numerical variables.
-            x_dec_cat: Decoded input corresponding to categorical variables: each element of the list if the decoded representation of a single
+            x_dec_cat: Decoded input corresponding to categorical variables: each element of the list is the decoded representation of a single
                        categorical feature.
         '''
         x_dec = x_enc
@@ -195,7 +196,7 @@ class Autoencoder(torch.nn.Module):
 
         Returns:
             x_dec_num: Decoded input corresponding to numerical variables.
-            x_dec_cat: Decoded input corresponding to categorical variables: each element of the list if the decoded representation of a single
+            x_dec_cat: Decoded input corresponding to categorical variables: each element of the list is the decoded representation of a single
                        categorical feature.
         '''
         ## encder
@@ -208,7 +209,7 @@ class Autoencoder(torch.nn.Module):
 
 class TrainModel:
     def __init__(self, model: torch.nn.Module, dict_params: dict, dataloader_train: torch.utils.data.DataLoader,
-                 dataloader_valid: torch.utils.data.DataLoader) -> None:
+                 dataloader_valid: torch.utils.data.DataLoader, rel_weight_losses: float = 0.5) -> None:
         '''
         Class to train an autoencoder for both numerical and categorical variables.
 
@@ -217,6 +218,8 @@ class TrainModel:
             dict_params: Dictionary containing the relevant parameters for training.
             dataloader_train: Training dataloader.
             dataloader_valid: Validation dataloader.
+            rel_weight_losses: Relative weight to be used between numerical and categorical losses;
+                               the total loss is `rel_weight_losses`*MSE + (1 - `rel_weight_losses`)*CrossEntropy.
 
         Returns:
             None.
@@ -229,6 +232,7 @@ class TrainModel:
         self.dataloader_valid = dataloader_valid
         self.path_artifacts = dict_params['training']['path_artifacts']
         self.n_feat_num = model.encoder.n_feat_num
+        self.rel_weight_losses = rel_weight_losses
 
     def _loss_num(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         '''
@@ -275,15 +279,16 @@ class TrainModel:
         Returns:
             loss: Value of the loss function.
         '''
+        rel_weight_losses = self.rel_weight_losses
         loss = 0
 
         # loss from numerical features
         if x_dec_num.shape[1] > 0:
-            loss = loss + self._loss_num(input = x_dec_num, target = target[:, :self.n_feat_num])
+            loss = loss + rel_weight_losses*self._loss_num(input = x_dec_num, target = target[:, :self.n_feat_num])
             
         # loss from categorical features
         if len(x_dec_cat) > 0:
-            loss = loss + self._loss_cat(input = x_dec_cat, target = target[:, self.n_feat_num:])
+            loss = loss + (1 - rel_weight_losses)*self._loss_cat(input = x_dec_cat, target = target[:, self.n_feat_num:])
 
         return loss
 
@@ -374,12 +379,11 @@ class TrainModel:
                 counter_patience += 1
             if (len(list_loss_valid) == 0) or ((len(list_loss_valid) > 0) and (loss_valid < np.min(list_loss_valid))):
                 counter_patience = 0
-                best_weights = model.state_dict()
+                best_weights = copy.deepcopy(model.state_dict())
                 if path_artifacts is not None:
                     torch.save(model.state_dict(), path_artifacts)
             if counter_patience >= dict_params_training['patience']:
                 print(f'Training stopped at epoch {epoch}. Restoring weights from epoch {np.argmin(list_loss_valid) + 1}.')
-                model.load_state_dict(torch.load(path_artifacts))
                 break
             #
             print(f'Epoch {epoch}: training loss = {loss_train:.4f}, validation loss = {loss_valid:.4f}, learning rate = {self.optimizer.param_groups[0]["lr"]}, patience counter = {counter_patience}.')

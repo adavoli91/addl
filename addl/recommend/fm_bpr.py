@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import copy
 from typing import Tuple
 
 class FactorizationMachine(torch.nn.Module):
@@ -265,12 +266,11 @@ class TrainModel:
                 counter_patience += 1
             if (len(list_loss_valid) == 0) or ((len(list_loss_valid) > 0) and (loss_valid < np.min(list_loss_valid))):
                 counter_patience = 0
-                best_weights = model.state_dict()
+                best_weights = copy.deepcopy(model.state_dict())
                 if path_artifacts is not None:
                         torch.save(model.state_dict(), path_artifacts)
             if counter_patience >= dict_params_training['patience']:
                 print(f'Training stopped at epoch {epoch}. Restoring weights from epoch {np.argmin(list_loss_valid) + 1}.')
-                model.load_state_dict(torch.load(path_artifacts))
                 break
             #
             print(f'Epoch {epoch}: training loss = {loss_train:.4f}, validation loss = {loss_valid:.4f}, learning rate = {self.optimizer.param_groups[0]["lr"]}, patience counter = {counter_patience}.')

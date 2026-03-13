@@ -1,353 +1,162 @@
-import numpy as np
+import sys
+import os
 import torch
-from typing import Tuple
+import copy
+from sklearn.cluster import KMeans
 
-class Encoder(torch.nn.Module):
-    def __init__(self, n_feat_num: int, list_neurons: list, list_num_vals_cat: list, dim_embed: int = 5, dropout: float = 0) -> None:
+main_dir = os.path.dirname(__file__).split('cluster')[0]
+sys.path.append(main_dir)
+
+from reconstruct.autoencoder import Autoencoder
+from reconstruct.autoencoder import TrainModel as TrainAutoencoder
+# from utils.dataset_dataloader import *
+
+class DEC(torch.nn.Module):
+    def __init__(self, initial_centroids: torch.Tensor, encoder: torch.nn.Module) -> None:
         '''
-        Class to implement an encoder.
+        Class to implement DEC.
 
         Args:
-            n_feat_num: Number of numerical features.
-            list_neurons: List of neurons for the hidden layers.
-            list_num_vals_cat: List containing the number of different values for each categorical variable.
-            dim_embed: Embedding dimension.
-            dropout: Dropout probability.
-
-        Returns: None.
-        '''
-        super().__init__()
-
-        n_feat = n_feat_num
-        self.n_feat_num = n_feat_num
-        self.list_num_vals_cat = list_num_vals_cat
-
-        ## embedding for categorical features
-        if len(list_num_vals_cat) > 0:
-            list_layers_embed = []
-            for n_vals in list_num_vals_cat:
-                list_layers_embed.append(torch.nn.Embedding(num_embeddings = n_vals, embedding_dim = dim_embed))
-            self.list_layers_embed = torch.nn.ModuleList(list_layers_embed)
-            #
-            n_feat += len(list_num_vals_cat)*dim_embed
-
-        ## encoding layers
-        list_neurons = [n_feat] + list_neurons
-        list_layers, list_layers_bn = [], []
-        for i in range(1, len(list_neurons)):
-            list_layers.append(torch.nn.Linear(in_features = list_neurons[i-1], out_features = list_neurons[i]))
-            list_layers_bn.append(torch.nn.BatchNorm1d(num_features = list_neurons[i]))
-        self.list_layers = torch.nn.ModuleList(list_layers)
-        self.list_layers_bn = torch.nn.ModuleList(list_layers_bn)
-
-        ## relu
-        self.relu = torch.nn.ReLU()
-
-        ## dropout
-        self.dropout = torch.nn.Dropout(p = dropout)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        '''
-        Function to encode the input.
-
-        Args:
-            x: Input tensor: all the numerical features are assumed to be in the first `n_feat_num` columns, and categorical ones are
-               assumed to be expressed as indices of some encoder (e.g., OrdinalEncoder).
-
-        Returns:
-            x_enc: Encoded input.
-        '''
-        x_enc = x
-
-        ## check dimensions
-        if x_enc.shape[1] != self.n_feat_num + len(self.list_num_vals_cat):
-            raise(ValueError(f'Dimensions do not match: the model expects an input with {self.n_feat_num} numerical and {len(self.list_num_vals_cat)} categorical features, but the provided one has {x_enc.shape[1]} features.'))
-        
-        ## embed categorical variables
-        if hasattr(self, 'list_layers_embed'):
-            x_enc_num = x[:, :self.n_feat_num]
-            x_temp = x[:, self.n_feat_num:]
-            #
-            counter_var = 0
-            x_enc_cat = []
-            for layer in self.list_layers_embed:
-                x_enc_cat.append(layer(x_temp[:, counter_var: counter_var + 1].int()))
-                counter_var += 1
-            x_enc_cat = torch.cat(x_enc_cat, dim = 1)
-            x_enc_cat = x_enc_cat.view(x_enc_cat.shape[0], -1)
-            #
-            x_enc = torch.cat((x_enc_num, x_enc_cat), dim = 1)
-
-        ## encode (embedded) input
-        for i in range(len(self.list_layers)):
-            x_enc = self.list_layers[i](x_enc)
-            x_enc = self.list_layers_bn[i](x_enc)
-            x_enc = self.relu(x_enc)
-            x_enc = self.dropout(x_enc)
-
-        return x_enc
-    
-class Decoder(torch.nn.Module):
-    def __init__(self, encoder: torch.nn.Module):
-        '''
-        Class to implement a decoder.
-
-        Args:
+            initial_centroids: Initial cluster centroids.
             encoder: Encoder.
 
         Returns: None.
         '''
         super().__init__()
+        self.centroids = torch.nn.Parameter(initial_centroids)
+        self.encoder = encoder
 
-        ## decoding layers
-        list_layers, list_layers_bn = [], []
-        for i, layer in enumerate(reversed(encoder.list_layers)):
-            list_layers.append(torch.nn.Linear(in_features = layer.out_features, out_features = layer.in_features))
-            if i < len(encoder.list_layers) - 1:
-                list_layers_bn.append(torch.nn.BatchNorm1d(num_features = layer.in_features))
-        self.list_layers = torch.nn.ModuleList(list_layers)
-        self.list_layers_bn = torch.nn.ModuleList(list_layers_bn)
-
-        ## inverse embedding
-        if hasattr(encoder, 'list_layers_embed'):
-            list_layers_embed_inv = []
-            for layer in encoder.list_layers_embed:
-                list_layers_embed_inv.append(torch.nn.Linear(in_features = layer.embedding_dim, out_features = layer.num_embeddings))
-            self.list_layers_embed_inv = torch.nn.ModuleList(list_layers_embed_inv)
-    
-        ## relu
-        self.relu = torch.nn.ReLU()
-    
-        ## dropout
-        self.dropout = torch.nn.Dropout(p = encoder.dropout.p)
-
-    def forward(self, x_enc: torch.Tensor) -> Tuple[torch.Tensor, list]:
+    def forward(self, x: torch.Tensor):
         '''
-        Function to decode the input.
+        Function to produce soft assignments q and target distribution p.
 
         Args:
-            x_enc: Encoded input.
+            x: Encoded input.
 
         Returns:
-            x_dec_num: Decoded input corresponding to numerical variables.
-            x_dec_cat: Decoded input corresponding to categorical variables: each element of the list if the decoded representation of a single
-                       categorical feature.
+            q: Soft assignment for each point to clusters.
+            p: Target distribution.
         '''
-        x_dec = x_enc
-        
-        # reverse encoding
-        for i in range(len(self.list_layers_bn)):
-            x_dec = self.list_layers[i](x_dec)
-            x_dec = self.list_layers_bn[i](x_dec)
-            x_dec = self.relu(x_dec)
-            x_dec = self.dropout(x_dec)
-        x_dec = self.list_layers[-1](x_dec)
-
-        ## reverse embedding of categorical variables (if any)
-        if hasattr(self, 'list_layers_embed_inv'):
-            n_vals_cat = len(self.list_layers_embed_inv)
-            dim_embed = self.list_layers_embed_inv[0].in_features
-            #
-            x_dec_num = x_dec[:, :-n_vals_cat*dim_embed]
-            x_dec_cat_emb = x_dec[:, -n_vals_cat*dim_embed:]
-            #
-            x_dec_cat = []
-            for i in range(n_vals_cat):
-                x_dec_cat.append(self.list_layers_embed_inv[i](x_dec_cat_emb[:, i*dim_embed: (i+1)*dim_embed]))
-        else:
-            n_vals_cat = 0
-            x_dec_num = x_dec
-            x_dec_cat = []
-
-        return x_dec_num, x_dec_cat
+        # distance from centroids
+        dist_from_centroids = x.unsqueeze(dim = 1) - self.centroids
+        # distribution q
+        q_num = 1/(1 + torch.linalg.norm(dist_from_centroids, dim = -1)**2)
+        q = q_num/q_num.sum(dim = -1).unsqueeze(dim = -1)
+        # distribution p
+        p_f = q.sum(dim = 0)
+        p_num = q**2/p_f
+        p = p_num/p_num.sum(dim = -1).unsqueeze(dim = -1)
+        #
+        return q, p
     
-class Autoencoder(torch.nn.Module):
-    def __init__(self, n_feat_num: int, list_neurons: list, list_num_vals_cat: list, dim_embed: int = 5, dropout: float = 0):
-        '''
-        Class to implement an autoencoder which works with both numerical and categorical variables.
-
-        Args:
-            n_feat_num: Number of numerical features.
-            list_neurons: List of neurons for the hidden layers.
-            list_num_vals_cat: List containing the number of different values for each categorical variable.
-            dim_embed: Embedding dimension.
-            dropout: Dropout probability.
-
-        Returns: None.
-        '''
-        super().__init__()
-
-        ## encoder
-        self.encoder = Encoder(n_feat_num = n_feat_num, list_neurons = list_neurons, list_num_vals_cat = list_num_vals_cat, dim_embed = dim_embed,
-                               dropout = dropout)
-
-        ## decoder
-        self.decoder = Decoder(encoder = self.encoder)
-
-
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, list]:
-        '''
-        Function to decode the input.
-
-        Args:
-            x: Input tensor: all the numerical features are assumed to be in the first `n_feat_num` columns, and categorical ones are
-               assumed to be expressed as indices of some encoder (e.g., OrdinalEncoder).
-
-        Returns:
-            x_dec_num: Decoded input corresponding to numerical variables.
-            x_dec_cat: Decoded input corresponding to categorical variables: each element of the list if the decoded representation of a single
-                       categorical feature.
-        '''
-        ## encder
-        x_enc = self.encoder(x)
-
-        ## decoder
-        x_dec_num, x_dec_cat = self.decoder(x_enc)
-
-        return x_dec_num, x_dec_cat
-
-
 class TrainModel:
-    def __init__(self, model: torch.nn.Module, dict_params: dict, dataloader_train: torch.utils.data.DataLoader,
-                 dataloader_valid: torch.utils.data.DataLoader, coef_reg: float = 1e-3) -> None:
+    def __init__(self, n_clust: int, dataloader_train: torch.utils.data.DataLoader, dataloader_valid: torch.utils.data.DataLoader,
+                 n_feat_num: int, list_num_vals_cat: list):
         '''
-        Class to train a FM with BPR loss.
+        Class to train DEC. Notice: the function `train_autoencoder` should be executed prior to `train_dec`.
 
         Args:
-            model: Model to be trained.
-            dict_params: Dictionary containing the relevant parameters for training.
+            n_clust: Number of clusters.
             dataloader_train: Training dataloader.
             dataloader_valid: Validation dataloader.
-            coef_reg: Regularization coefficient.
+            n_feat_num: Number of numerical features.
+            list_num_vals_cat: List containing the number of different values for each categorical variable.
 
         Returns:
             None.
         '''
-        self.model = model
-        self.dict_params_training = dict_params['training']
-        self.optimizer = torch.optim.AdamW(params = model.parameters(), lr = dict_params['training']['lr'])
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer = self.optimizer, factor = 0.5)
+        self.n_clust = n_clust
         self.dataloader_train = dataloader_train
         self.dataloader_valid = dataloader_valid
-        self.coef_reg = coef_reg
-        self.path_artifacts = dict_params['training']['path_artifacts']
+        self.n_feat_num = n_feat_num
+        self.list_num_vals_cat = list_num_vals_cat
 
-    def loss_func(self, x_uij: torch.Tensor) -> float:
+    def train_autoencoder(self, dict_params: dict) -> None:
         '''
-        Function to implement the BPR loss.
+        Function to train the autoencoder.
 
         Args:
-            x_uij: Difference between the score returned by to model on seen and unseen instances.
-        
-        Returns:
-            loss: BPR loss.
-        '''
-        loss = -torch.nn.LogSigmoid()(x_uij).mean()
-        for module in self.model.children():
-            if type(module) == torch.nn.ModuleList:
-                loss += self.coef_reg*sum([torch.linalg.norm([layer.weight])**2 for layer in module])
-        return loss
+            dict_params: Dictionary containing the relevant parameters for training the autoencoder.
 
-    def _model_on_batch(self, batch: tuple, training: bool) -> float:
+        Returns: None.
         '''
-        Function to perform training on a single batch of data.
-        
-        Args:
-            batch: Batch of data to use for training/evaluation.
-            training: Whether to perform training (if not, evaluation is understood).
-            loss_epoch: Loss of the current epoch.
-            
-        Returns:
-            loss: Value of the loss function.
-        '''
-        model = self.model
-        device = next(model.parameters()).device
+        dict_params_model = dict_params['model']
         #
-        if training == True:
-            self.optimizer.zero_grad()
-        #
-        X = batch
-        X = X.to(device)
-        x_uij = model(X).to(device)
-        #
-        loss = self.loss_func(x_uij = x_uij)
-        #
-        if training == True:
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            self.optimizer.step()
-        #
-        return loss.item()
+        if hasattr(self, 'autoenc'):
+            del autoenc
+            del self.autoenc
+        autoenc = Autoencoder(n_feat_num = self.n_feat_num, list_neurons = dict_params_model['list_neurons'], list_num_vals_cat = self.list_num_vals_cat,
+                              dim_embed = dict_params_model['dim_embed'], dropout = dict_params_model['dropout'])
+        trainer = TrainAutoencoder(model = autoenc, dict_params = dict_params, dataloader_train = self.dataloader_train, dataloader_valid = self.dataloader_valid)
+        print('****************** Training of the autoencoder ******************')
+        autoenc, _, _ = trainer.train_model()
+        self.autoenc = autoenc
 
-    def _train(self) -> float:
+    def _get_initial_centroids(self) -> None:
         '''
-        Function to train the model on a single epoch.
-        
+        Function to get the initial centroids with K-means.
+
         Args: None.
-            
-        Returns:
-            loss: Value of the training loss function per batch.
-        '''
-        self.model.train()
-        loss_epoch = 0
-        for batch in self.dataloader_train:
-            loss_epoch += self._model_on_batch(batch = batch, training = True)
-        return loss_epoch/len(self.dataloader_train)
 
-    def _eval(self) -> float:
+        Returns: None.
         '''
-        Function to evaluate the model on the validation set on a single epoch.
-        
-        Args: None.
-            
-        Returns:
-            loss: Value of the validation loss function per batch.
-        '''
-        self.model.eval()
-        loss_epoch = 0
+        dataset_train = self.dataloader_train.dataset
+        autoenc = self.autoenc.eval()
+        # perform initial k-means
         with torch.no_grad():
-            for batch in self.dataloader_valid:
-                loss_epoch += self._model_on_batch(batch = batch, training = False)
-        return loss_epoch/len(self.dataloader_valid)
+            x_enc = autoenc.encoder(dataset_train.X)
+        self.autoenc.train()
+        k_means = KMeans(n_clusters = self.n_clust)
+        k_means.fit(x_enc)
+        centroids = torch.tensor(k_means.cluster_centers_).float()
+        self.k_means = k_means
+        #
+        if hasattr(self, 'dec'):
+            del self.dec
+        self.dec = DEC(initial_centroids = centroids, encoder = self.autoenc.encoder)
 
-    def train_model(self) -> Tuple[torch.nn.Module, list, list]:
+    def train_dec(self, dict_params: dict) -> None:
         '''
-        Function to train the model.
-        
-        Args: None.
-            
-        Returns:
-            model: Trained model.
-            list_loss_train: List of training loss function across the epochs.
-            list_loss_valid: List of validation loss function across the epochs.
+        Function to train DEC.
+
+        Args:
+            dict_params: Dictionary containing the relevant parameters for training DEC.
+
+        Returns: None.
         '''
-        dict_params_training = self.dict_params_training
-        n_epochs = dict_params_training['n_epochs']
-        list_loss_train, list_loss_valid = [], []
-        path_artifacts = self.path_artifacts
+        # get initial centroids
+        self._get_initial_centroids()
         #
-        counter_patience = 0
-        for epoch in range(1, n_epochs + 1):
-            loss_train = self._train()
-            loss_valid = self._eval()
-            #
-            if (len(list_loss_valid) > 0) and (loss_valid >= np.min(list_loss_valid)*(1 - dict_params_training['min_delta_loss_perc'])):
-                counter_patience += 1
-            if (len(list_loss_valid) == 0) or ((len(list_loss_valid) > 0) and (loss_valid < np.min(list_loss_valid))):
-                counter_patience = 0
-                if path_artifacts is not None:
-                        torch.save(self.model.state_dict(), path_artifacts)
-            if counter_patience >= dict_params_training['patience']:
-                print(f'Training stopped at epoch {epoch}. Restoring weights from epoch {np.argmin(list_loss_valid) + 1}.')
-                self.model.load_state_dict(torch.load(path_artifacts))
-                break
-            #
-            print(f'Epoch {epoch}: training loss = {loss_train:.4f}, validation loss = {loss_valid:.4f}, patience counter = {counter_patience}.')
-            self.scheduler.step(loss_valid)
-            #
-            list_loss_train.append(loss_train)
-            list_loss_valid.append(loss_valid)
+        dataset_train = self.dataloader_train.dataset
+        dict_params_training = dict_params['training']
         #
-        if path_artifacts is not None:
-            self.model.load_state_dict(torch.load(path_artifacts))
-        return self.model, list_loss_train, list_loss_valid
+        dec = self.dec
+        optimizer = torch.optim.Adam(params = self.dec.parameters(), lr = dict_params_training['lr'])
+        #
+        print()
+        print('****************** Training of DEC ******************')
+        for n_iter in range(dict_params_training['n_iterations']):
+            X_enc = self.dec.encoder(dataset_train.X)
+            #
+            q, p = dec(X_enc)
+            # update target distribution
+            if n_iter%dict_params_training['n_iters_update_target'] == 0:
+                p_target = p.detach()
+            # KL divergence
+            loss_kl = torch.nn.KLDivLoss(reduction =  'batchmean')
+            loss = loss_kl(input = q.log(), target = p_target)
+            # cluster assignment
+            clust_assign = q.argmax(dim = -1)
+            #
+            if n_iter > 0: 
+                frac_changed = (clust_assign != clust_assign_old).sum()/clust_assign.shape[0]
+                print(f'Iteration {n_iter}: fraction of points that changed cluster assignment = {frac_changed*100:.1f}%')
+                if (frac_changed <= dict_params_training['thresh_stop_training']) and (n_iter > 10):
+                    break
+            # loss backpropagation
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            #
+            clust_assign_old = clust_assign
+        return dec
