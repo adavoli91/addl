@@ -1,15 +1,13 @@
 import sys
 import os
 import torch
-import copy
 from sklearn.cluster import KMeans
-
+#
 main_dir = os.path.dirname(__file__).split('cluster')[0]
 sys.path.append(main_dir)
-
+#
 from reconstruct.autoencoder import Autoencoder
 from reconstruct.autoencoder import TrainModel as TrainAutoencoder
-# from utils.dataset_dataloader import *
 
 class DEC(torch.nn.Module):
     def __init__(self, initial_centroids: torch.Tensor, encoder: torch.nn.Module) -> None:
@@ -18,7 +16,7 @@ class DEC(torch.nn.Module):
 
         Args:
             initial_centroids: Initial cluster centroids.
-            encoder: Encoder.
+            encoder: Pre-trained encoder.
 
         Returns: None.
         '''
@@ -145,7 +143,7 @@ class TrainModel:
             if n_iter%dict_params_training['n_iters_update_target'] == 0:
                 p_target = p.detach()
             # KL divergence
-            loss_kl = torch.nn.KLDivLoss(reduction =  'batchmean')
+            loss_kl = torch.nn.KLDivLoss(reduction = 'batchmean')
             loss = loss_kl(input = q.log(), target = p_target)
             # cluster assignment
             clust_assign = q.argmax(dim = -1)

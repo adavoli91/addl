@@ -89,7 +89,7 @@ class Encoder(torch.nn.Module):
         return x_enc
     
 class Decoder(torch.nn.Module):
-    def __init__(self, encoder: torch.nn.Module):
+    def __init__(self, encoder: torch.nn.Module) -> None:
         '''
         Class to implement a decoder.
 
@@ -163,7 +163,7 @@ class Decoder(torch.nn.Module):
         return x_dec_num, x_dec_cat
     
 class Autoencoder(torch.nn.Module):
-    def __init__(self, n_feat_num: int, list_neurons: list, list_num_vals_cat: list, dim_embed: int = 5, dropout: float = 0):
+    def __init__(self, n_feat_num: int, list_neurons: list, list_num_vals_cat: list, dim_embed: int = 5, dropout: float = 0) -> None:
         '''
         Class to implement an autoencoder which works with both numerical and categorical variables.
 
@@ -195,17 +195,17 @@ class Autoencoder(torch.nn.Module):
                assumed to be expressed as indices of some encoder (e.g., OrdinalEncoder).
 
         Returns:
-            x_dec_num: Decoded input corresponding to numerical variables.
-            x_dec_cat: Decoded input corresponding to categorical variables: each element of the list is the decoded representation of a single
+            x_hat_num: Reconstructed input corresponding to numerical variables.
+            x_hat_cat: Reconstructed input corresponding to categorical variables: each element of the list is the decoded representation of a single
                        categorical feature.
         '''
         ## encder
         x_enc = self.encoder(x)
 
         ## decoder
-        x_dec_num, x_dec_cat = self.decoder(x_enc)
+        x_hat_num, x_hat_cat = self.decoder(x_enc)
 
-        return x_dec_num, x_dec_cat
+        return x_hat_num, x_hat_cat
 
 class TrainModel:
     def __init__(self, model: torch.nn.Module, dict_params: dict, dataloader_train: torch.utils.data.DataLoader,
@@ -267,13 +267,13 @@ class TrainModel:
             loss_tot = loss_tot + loss
         return loss_tot/len(input)
 
-    def loss(self, x_dec_num: torch.Tensor, x_dec_cat, target: torch.Tensor) -> torch.Tensor:
+    def loss(self, x_hat_num: torch.Tensor, x_hat_cat, target: torch.Tensor) -> torch.Tensor:
         '''
         Function to compute the loss for both numerical and categorical variables.
 
         Args:
-            x_dec_num: Input (reconstructed) tensor for numerical variables.
-            x_dec_cat: List of input (reconstructed) tensors for categorical variables.
+            x_hat_num: Reconstructed input corresponding to numerical variables.
+            x_hat_cat: List of reconstructed inputs corresponding to categorical variables.
             target: Target (ground truth) tensor.
 
         Returns:
@@ -283,12 +283,12 @@ class TrainModel:
         loss = 0
 
         # loss from numerical features
-        if x_dec_num.shape[1] > 0:
-            loss = loss + rel_weight_losses*self._loss_num(input = x_dec_num, target = target[:, :self.n_feat_num])
+        if x_hat_num.shape[1] > 0:
+            loss = loss + rel_weight_losses*self._loss_num(input = x_hat_num, target = target[:, :self.n_feat_num])
             
         # loss from categorical features
-        if len(x_dec_cat) > 0:
-            loss = loss + (1 - rel_weight_losses)*self._loss_cat(input = x_dec_cat, target = target[:, self.n_feat_num:])
+        if len(x_hat_cat) > 0:
+            loss = loss + (1 - rel_weight_losses)*self._loss_cat(input = x_hat_cat, target = target[:, self.n_feat_num:])
 
         return loss
 
@@ -312,8 +312,8 @@ class TrainModel:
         #
         X = batch
         X = X.to(device)
-        X_dec_num, X_dec_cat = model(X)
-        loss = self.loss(x_dec_num = X_dec_num, x_dec_cat = X_dec_cat, target = X)
+        X_hat_num, X_hat_cat = model(X)
+        loss = self.loss(x_hat_num = X_hat_num, x_hat_cat = X_hat_cat, target = X)
         #
         if training == True:
             loss.backward()
