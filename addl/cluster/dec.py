@@ -1,6 +1,7 @@
 import sys
 import os
 import torch
+import copy
 from sklearn.cluster import KMeans
 #
 main_dir = os.path.dirname(__file__).split('cluster')[0]
@@ -91,6 +92,7 @@ class TrainModel:
         print('****************** Training of the autoencoder ******************')
         autoenc, _, _ = trainer.train_model()
         self.autoenc = autoenc
+        self.autoenc_original_weights = copy.deepcopy(autoenc.state_dict())
 
     def _get_initial_centroids(self) -> None:
         '''
@@ -109,10 +111,13 @@ class TrainModel:
         k_means = KMeans(n_clusters = self.n_clust, random_state = self.seed)
         k_means.fit(x_enc)
         centroids = torch.tensor(k_means.cluster_centers_).float()
+        self.x_enc_original = copy.deepcopy(x_enc)
         self.k_means = k_means
         #
         if hasattr(self, 'dec'):
             del self.dec
+            # reset autoencoder weights
+            self.autoenc.load_state_dict(self.autoenc_original_weights)
         self.dec = DEC(initial_centroids = centroids, encoder = self.autoenc.encoder)
 
     def train_dec(self, dict_params: dict) -> None:
