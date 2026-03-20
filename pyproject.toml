@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "addl"
-version = "0.1.1"
+version = "0.1.2"
 description = "Package for deep learning in pytorch"
 authors = [{name = "Alessandro Davoli"}]
 readme = "README.md"
