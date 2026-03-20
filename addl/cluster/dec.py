@@ -84,7 +84,6 @@ class TrainModel:
         dict_params_model = dict_params['model']
         #
         if hasattr(self, 'autoenc'):
-            del autoenc
             del self.autoenc
         autoenc = Autoencoder(n_feat_num = self.n_feat_num, list_neurons = dict_params_model['list_neurons'], list_num_vals_cat = self.list_num_vals_cat,
                               dim_embed = dict_params_model['dim_embed'], dropout = dict_params_model['dropout'])
@@ -120,14 +119,15 @@ class TrainModel:
             self.autoenc.load_state_dict(self.autoenc_original_weights)
         self.dec = DEC(initial_centroids = centroids, encoder = self.autoenc.encoder)
 
-    def train_dec(self, dict_params: dict) -> None:
+    def train_dec(self, dict_params: dict) -> torch.nn.Module:
         '''
         Function to train DEC.
 
         Args:
             dict_params: Dictionary containing the relevant parameters for training DEC.
 
-        Returns: None.
+        Returns:
+            dec: Trained DEC.
         '''
         # get initial centroids
         self._get_initial_centroids()
@@ -136,23 +136,26 @@ class TrainModel:
         dict_params_training = dict_params['training']
         #
         dec = self.dec
+        device = next(dec.parameters()).device
         optimizer = torch.optim.Adam(params = self.dec.parameters(), lr = dict_params_training['lr'])
         #
+        loss_kl = torch.nn.KLDivLoss(reduction = 'batchmean')
         print()
         print('****************** Training of DEC ******************')
         for n_iter in range(dict_params_training['n_iterations']):
-            X_enc = self.dec.encoder(dataset_train.X)
+            dataset = dataset_train.X.to(device)[torch.randperm(dataset_train.X.shape[0])]
+            X = dataset
+            X_enc = self.dec.encoder(X)
             #
             q, p = dec(X_enc)
             # update target distribution
             if n_iter%dict_params_training['n_iters_update_target'] == 0:
                 p_target = p.detach()
             # KL divergence
-            loss_kl = torch.nn.KLDivLoss(reduction = 'batchmean')
             loss = loss_kl(input = q.log(), target = p_target)
             # cluster assignment
             clust_assign = q.argmax(dim = -1)
-            #
+            # check the fraction of points which changed cluster assignment
             if n_iter > 0: 
                 frac_changed = (clust_assign != clust_assign_old).sum()/clust_assign.shape[0]
                 print(f'Iteration {n_iter}: fraction of points that changed cluster assignment = {frac_changed*100:.1f}%')

@@ -26,7 +26,6 @@ class IDEC(torch.nn.Module):
         Returns: None.
         '''
         super().__init__()
-        self.centroids = torch.nn.Parameter(initial_centroids)
         self.autoencoder = autoencoder
         self.dec = DEC(initial_centroids = initial_centroids, encoder = autoencoder.encoder)
 
@@ -95,7 +94,6 @@ class TrainModel:
         dict_params_model = dict_params['model']
         #
         if hasattr(self, 'autoenc'):
-            del autoenc
             del self.autoenc
         autoenc = Autoencoder(n_feat_num = self.n_feat_num, list_neurons = dict_params_model['list_neurons'], list_num_vals_cat = self.list_num_vals_cat,
                               dim_embed = dict_params_model['dim_embed'], dropout = dict_params_model['dropout'])
@@ -103,6 +101,7 @@ class TrainModel:
         print('****************** Training of the autoencoder ******************')
         autoenc, _, _ = trainer.train_model()
         self.autoenc = autoenc
+        self.autoenc_original_weights = copy.deepcopy(autoenc.state_dict())
 
     def _get_initial_centroids(self) -> None:
         '''
@@ -121,10 +120,13 @@ class TrainModel:
         k_means = KMeans(n_clusters = self.n_clust, random_state = self.seed)
         k_means.fit(x_enc)
         centroids = torch.tensor(k_means.cluster_centers_).float()
+        self.x_enc_original = copy.deepcopy(x_enc)
         self.k_means = k_means
         #
         if hasattr(self, 'idec'):
             del self.idec
+            # reset autoencoder weights
+            self.autoenc.load_state_dict(self.autoenc_original_weights)
         self.idec = IDEC(initial_centroids = centroids, autoencoder = self.autoenc)
 
     def _loss_num(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -184,126 +186,68 @@ class TrainModel:
             loss = loss + (1 - rel_weight_losses)*self._loss_cat(input = x_hat_cat, target = target[:, self.n_feat_num:])
 
         return loss
-
-    def _model_on_batch(self, batch: tuple, training: bool) -> float:
-        '''
-        Function to perform training on a single batch of data.
-        
-        Args:
-            batch: Batch of data to use for training/evaluation.
-            training: Whether to perform training (if not, evaluation is understood).
-            loss_epoch: Loss of the current epoch.
-            
-        Returns:
-            loss: Value of the loss function.
-        '''
-        idec = self.idec
-        device = next(idec.parameters()).device
-        gamma = self.dict_params_training['weight_loss_clust']
-        #
-        if training == True:
-            self.optimizer.zero_grad()
-        #
-        X = batch
-        X = X.to(device)
-        X_hat_num, X_hat_cat, q, p = idec(X)
-        p = p.detach()
-        # reconstruction loss
-        loss_ae = self.loss_ae(x_hat_num = X_hat_num, x_hat_cat = X_hat_cat, target = X)
-        # clustering loss
-        loss_clust_func = torch.nn.KLDivLoss(reduction = 'batchmean')
-        loss_clust = loss_clust_func(input = q.log(), target = p)
-        # total loss
-        loss = loss_ae + gamma*loss_clust
-        #
-        if training == True:
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(idec.parameters(), 1.0)
-            self.optimizer.step()
-        #
-        return loss.item()
     
-    def _train(self) -> float:
-        '''
-        Function to train the model on a single epoch.
-        
-        Args: None.
-            
-        Returns:
-            loss: Value of the training loss function per batch.
-        '''
-        self.idec.train()
-        loss_epoch = 0
-        for batch in self.dataloader_train:
-            loss_epoch += self._model_on_batch(batch = batch, training = True)
-        return loss_epoch/len(self.dataloader_train)
-
-    def _eval(self) -> float:
-        '''
-        Function to evaluate the model on the validation set on a single epoch.
-        
-        Args: None.
-            
-        Returns:
-            loss: Value of the validation loss function per batch.
-        '''
-        self.idec.eval()
-        loss_epoch = 0
-        with torch.no_grad():
-            for batch in self.dataloader_valid:
-                loss_epoch += self._model_on_batch(batch = batch, training = False)
-        return loss_epoch/len(self.dataloader_valid)
-
-    def train_idec(self, dict_params: dict) -> None:
+    def train_model(self, dict_params: dict) -> torch.nn.Module:
         '''
         Function to train IDEC.
-        
+
         Args:
             dict_params: Dictionary containing the relevant parameters for training IDEC.
-            
+
         Returns:
-            idec: Trained IDEC.
-            list_loss_train: List of training loss function across the epochs.
-            list_loss_valid: List of validation loss function across the epochs.
+            dec: Trained IDEC.
         '''
-        print()
-        print('****************** Training of IDEC ******************')
-        # get initial centroids
         self._get_initial_centroids()
         #
+        idec = self.idec
+        device = next(idec.parameters()).device
         dataset_train = self.dataloader_train.dataset
         dict_params_training = dict_params['training']
         #
-        idec = self.idec
-        self.optimizer = torch.optim.Adam(params = idec.parameters(), lr = dict_params_training['lr'])
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer = self.optimizer, factor = 0.5)
-        n_epochs = dict_params_training['n_epochs']
-        list_loss_train, list_loss_valid = [], []
-        path_artifacts = self.path_artifacts
+        device = next(idec.parameters()).device
+        gamma = dict_params_training['weight_loss_clust']
+        batch_size = dict_params_training['batch_size']
+        optimizer = torch.optim.Adam(params = idec.parameters(), lr = dict_params_training['lr'])
         #
-        counter_patience = 0
-        for epoch in range(1, n_epochs + 1):
-            loss_train = self._train()
-            loss_valid = self._eval()
+        print()
+        print('****************** Training of IDEC ******************')
+        for n_iter in range(dict_params_training['n_iterations']):
+            # update target distribution
+            if n_iter%dict_params_training['n_iters_update_target'] == 0:
+                X = dataset_train.X.to(device)
+                idec.eval()
+                with torch.no_grad():
+                    _, _, q, p = idec(X)
+                idec.train()
+                p_target = p.detach()
+                #
+                clust_assign = q.argmax(dim = -1)
+                # check the fraction of points which changed cluster assignment
+                if n_iter > 0:
+                    frac_changed = (clust_assign != clust_assign_old).sum()/clust_assign.shape[0]
+                    print(f'Iteration {n_iter}: fraction of points that changed cluster assignment = {frac_changed*100:.1f}%')
+                    if (frac_changed <= dict_params_training['thresh_stop_training']) and (n_iter > 10):
+                        break
+                #
+                clust_assign_old = clust_assign
             #
-            if (len(list_loss_valid) > 0) and (loss_valid >= np.min(list_loss_valid)*(1 - dict_params_training['min_delta_loss_perc'])):
-                counter_patience += 1
-            if (len(list_loss_valid) == 0) or ((len(list_loss_valid) > 0) and (loss_valid < np.min(list_loss_valid))):
-                counter_patience = 0
-                best_weights = copy.deepcopy(idec.state_dict())
-                if path_artifacts is not None:
-                    torch.save(idec.state_dict(), path_artifacts)
-            if counter_patience >= dict_params_training['patience']:
-                print(f'Training stopped at epoch {epoch}. Restoring weights from epoch {np.argmin(list_loss_valid) + 1}.')
-                break
-            #
-            print(f'Epoch {epoch}: training loss = {loss_train:.4f}, validation loss = {loss_valid:.4f}, learning rate = {self.optimizer.param_groups[0]["lr"]}, patience counter = {counter_patience}.')
-            self.scheduler.step(loss_valid)
-            #
-            list_loss_train.append(loss_train)
-            list_loss_valid.append(loss_valid)
-        #
-        if path_artifacts is not None:
-            idec.load_state_dict(torch.load(path_artifacts))
-        idec.load_state_dict(best_weights)
-        return idec, list_loss_train, list_loss_valid
+            idx = 0
+            X_tot = dataset_train.X
+            X_tot = X_tot[torch.randperm(X_tot.shape[0])]
+            while idx < X_tot.shape[0]:
+                X = X_tot[idx: idx + batch_size].to(device)
+                X_hat_num, X_hat_cat, q, _ = idec(X)
+                # reconstruction loss
+                loss_ae = self.loss_ae(x_hat_num = X_hat_num, x_hat_cat = X_hat_cat, target = X)
+                # clustering loss
+                loss_clust_func = torch.nn.KLDivLoss(reduction = 'batchmean')
+                loss_clust = loss_clust_func(input = q.log(), target = p_target[idx: idx + batch_size])
+                # total loss
+                loss = loss_ae + gamma*loss_clust
+                # loss backpropagation
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                #
+                idx += batch_size
+        return idec
