@@ -1,19 +1,10 @@
-import numpy as np
 import torch
 import copy
-import os
-import sys
 from sklearn.cluster import KMeans
+import torch
+import copy
 from typing import Tuple
-#
-main_dir = os.path.dirname(__file__).split('cluster')[0]
-sys.path.append(main_dir)
-sys.path.append(os.path.join(main_dir, 'cluster'))
-#
-from reconstruct.autoencoder import Autoencoder
-from reconstruct.autoencoder import TrainModel as TrainAutoencoder
-from dec import DEC
-    
+
 class IDEC(torch.nn.Module):
     def __init__(self, initial_centroids: torch.Tensor, autoencoder: torch.nn.Module):
         '''
@@ -47,11 +38,10 @@ class IDEC(torch.nn.Module):
         autoencoder = self.autoencoder
         
         # autoencder
-        x_enc = autoencoder.encoder(x)
         x_hat_num, x_hat_cat = autoencoder(x)
         
         # DEC
-        q, p = self.dec(x_enc)
+        q, p = self.dec(x)
 
         return x_hat_num, x_hat_cat, q, p
 
@@ -80,7 +70,6 @@ class TrainModel:
         self.list_num_vals_cat = list_num_vals_cat
         self.seed = seed
         self.dict_params_training = dict_params['training']
-        self.path_artifacts = dict_params['training']['path_artifacts']
 
     def train_autoencoder(self, dict_params: dict) -> None:
         '''
@@ -111,11 +100,14 @@ class TrainModel:
 
         Returns: None.
         '''
-        dataset_train = self.dataloader_train.dataset
+        dataset_train = self.dataloader_train.dataset.X
+        # reshuffle data
+        dataset_train = dataset_train[torch.randperm(dataset_train.shape[0])]
+        #
         autoenc = self.autoenc.eval()
         # perform initial k-means
         with torch.no_grad():
-            x_enc = autoenc.encoder(dataset_train.X)
+            x_enc = autoenc.encoder(dataset_train)
         self.autoenc.train()
         k_means = KMeans(n_clusters = self.n_clust, random_state = self.seed)
         k_means.fit(x_enc)
@@ -123,10 +115,12 @@ class TrainModel:
         self.x_enc_original = copy.deepcopy(x_enc)
         self.k_means = k_means
         #
-        if hasattr(self, 'idec'):
-            del self.idec
+        if hasattr(self, 'dec'):
+            del self.dec
             # reset autoencoder weights
             self.autoenc.load_state_dict(self.autoenc_original_weights)
+        #
+        self.dataset_train = dataset_train
         self.idec = IDEC(initial_centroids = centroids, autoencoder = self.autoenc)
 
     def _loss_num(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -201,7 +195,6 @@ class TrainModel:
         #
         idec = self.idec
         device = next(idec.parameters()).device
-        dataset_train = self.dataloader_train.dataset
         dict_params_training = dict_params['training']
         #
         device = next(idec.parameters()).device
@@ -212,9 +205,9 @@ class TrainModel:
         print()
         print('****************** Training of IDEC ******************')
         for n_iter in range(dict_params_training['n_iterations']):
+            X = self.dataset_train
             # update target distribution
             if n_iter%dict_params_training['n_iters_update_target'] == 0:
-                X = dataset_train.X.to(device)
                 idec.eval()
                 with torch.no_grad():
                     _, _, q, p = idec(X)
@@ -232,13 +225,11 @@ class TrainModel:
                 clust_assign_old = clust_assign
             #
             idx = 0
-            X_tot = dataset_train.X
-            X_tot = X_tot[torch.randperm(X_tot.shape[0])]
-            while idx < X_tot.shape[0]:
-                X = X_tot[idx: idx + batch_size].to(device)
-                X_hat_num, X_hat_cat, q, _ = idec(X)
+            while idx < X.shape[0]:
+                batch = X[idx: idx + batch_size].to(device)
+                X_hat_num, X_hat_cat, q, _ = idec(batch)
                 # reconstruction loss
-                loss_ae = self.loss_ae(x_hat_num = X_hat_num, x_hat_cat = X_hat_cat, target = X)
+                loss_ae = self.loss_ae(x_hat_num = X_hat_num, x_hat_cat = X_hat_cat, target = batch)
                 # clustering loss
                 loss_clust_func = torch.nn.KLDivLoss(reduction = 'batchmean')
                 loss_clust = loss_clust_func(input = q.log(), target = p_target[idx: idx + batch_size])

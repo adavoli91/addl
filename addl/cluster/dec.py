@@ -1,14 +1,8 @@
-import sys
-import os
 import torch
 import copy
 from sklearn.cluster import KMeans
-#
-main_dir = os.path.dirname(__file__).split('cluster')[0]
-sys.path.append(main_dir)
-#
-from reconstruct.autoencoder import Autoencoder
-from reconstruct.autoencoder import TrainModel as TrainAutoencoder
+import torch
+import copy
 
 class DEC(torch.nn.Module):
     def __init__(self, initial_centroids: torch.Tensor, encoder: torch.nn.Module) -> None:
@@ -36,8 +30,9 @@ class DEC(torch.nn.Module):
             q: Soft assignment for each point to clusters.
             p: Target distribution.
         '''
+        x_enc = self.encoder(x)
         # distance from centroids
-        dist_from_centroids = x.unsqueeze(dim = 1) - self.centroids
+        dist_from_centroids = x_enc.unsqueeze(dim = 1) - self.centroids
         # distribution q
         q_num = 1/(1 + torch.linalg.norm(dist_from_centroids, dim = -1)**2)
         q = q_num/q_num.sum(dim = -1).unsqueeze(dim = -1)
@@ -101,11 +96,14 @@ class TrainModel:
 
         Returns: None.
         '''
-        dataset_train = self.dataloader_train.dataset
+        dataset_train = self.dataloader_train.dataset.X
+        # reshuffle data
+        dataset_train = dataset_train[torch.randperm(dataset_train.shape[0])]
+        #
         autoenc = self.autoenc.eval()
         # perform initial k-means
         with torch.no_grad():
-            x_enc = autoenc.encoder(dataset_train.X)
+            x_enc = autoenc.encoder(dataset_train)
         self.autoenc.train()
         k_means = KMeans(n_clusters = self.n_clust, random_state = self.seed)
         k_means.fit(x_enc)
@@ -117,8 +115,10 @@ class TrainModel:
             del self.dec
             # reset autoencoder weights
             self.autoenc.load_state_dict(self.autoenc_original_weights)
+        #
+        self.dataset_train = dataset_train
         self.dec = DEC(initial_centroids = centroids, encoder = self.autoenc.encoder)
-
+        
     def train_dec(self, dict_params: dict) -> torch.nn.Module:
         '''
         Function to train DEC.
@@ -132,7 +132,6 @@ class TrainModel:
         # get initial centroids
         self._get_initial_centroids()
         #
-        dataset_train = self.dataloader_train.dataset
         dict_params_training = dict_params['training']
         #
         dec = self.dec
@@ -143,11 +142,9 @@ class TrainModel:
         print()
         print('****************** Training of DEC ******************')
         for n_iter in range(dict_params_training['n_iterations']):
-            dataset = dataset_train.X.to(device)[torch.randperm(dataset_train.X.shape[0])]
-            X = dataset
-            X_enc = self.dec.encoder(X)
+            X = self.dataset_train
             #
-            q, p = dec(X_enc)
+            q, p = dec(X)
             # update target distribution
             if n_iter%dict_params_training['n_iters_update_target'] == 0:
                 p_target = p.detach()
